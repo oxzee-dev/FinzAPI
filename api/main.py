@@ -17,6 +17,14 @@ TICKER_REGEX = re.compile(r"^[A-Z0-9.\-]{1,10}$")
 API_KEY_ENV = os.environ.get("API_KEY", "")
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",")]
 
+# Warn loudly at startup if no key is set
+if not API_KEY_ENV:
+    import warnings
+    warnings.warn(
+        "API_KEY env variable is not set — API is running with NO authentication.",
+        stacklevel=2,
+    )
+
 # ─────────────────────────────────────────────────────────────
 # App + CORS
 # ─────────────────────────────────────────────────────────────
@@ -42,10 +50,8 @@ app.add_middleware(
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 async def verify_api_key(api_key: str = Security(api_key_header)):
-    """Dependency: validate API key. Skip if no key is configured (dev mode)."""
-    if not API_KEY_ENV:
-        return  # dev mode — no key required
-    if api_key != API_KEY_ENV:
+    """Dependency: validate API key. Always enforced."""
+    if not api_key or api_key != API_KEY_ENV:
         raise HTTPException(status_code=401, detail="Invalid or missing API key.")
 
 
