@@ -294,13 +294,44 @@ def df_to_dict(df) -> dict:
     return df.to_dict()
 
 
+def _safe_str(fn):
+    """Call fn(), return str of result or error string — never raises."""
+    try:
+        result = fn()
+        if result is None:
+            return None
+        import pandas as pd
+        if isinstance(result, pd.DataFrame):
+            if result.empty:
+                return None
+            # Reset index so all data is visible, stringify without HTML
+            result = result.reset_index()
+            result.columns = [str(c) for c in result.columns]
+            return result.to_json(orient="records", date_format="iso", default_handler=str)
+        return str(result)
+    except Exception as e:
+        return f"unavailable: {e}"
+
+
 def _build_earnings(symbol: str) -> dict:
     stock = yf.Ticker(symbol)
+    info = stock.info
     return {
         "ticker": symbol,
-        "earnings_dates":    str(stock.get_earnings_dates()),
-        #"earnings_dates":    str(stock.earnings_dates),
-        "earnings_estimate": str(stock.get_earnings_estimate()),
+        # Safe keys from .info — no HTML parsing
+        "trailingEps":               info.get("trailingEps"),
+        "forwardEps":                info.get("forwardEps"),
+        "epsCurrentYear":            info.get("epsCurrentYear"),
+        "earningsGrowth":            info.get("earningsGrowth"),
+        "earningsQuarterlyGrowth":   info.get("earningsQuarterlyGrowth"),
+        "mostRecentQuarter":         info.get("mostRecentQuarter"),
+        "nextFiscalYearEnd":         info.get("nextFiscalYearEnd"),
+        "lastFiscalYearEnd":         info.get("lastFiscalYearEnd"),
+        "earningsTimestamp":         info.get("earningsTimestamp"),
+        "earningsTimestampStart":    info.get("earningsTimestampStart"),
+        "earningsTimestampEnd":      info.get("earningsTimestampEnd"),
+        "earningsCallTimestampStart":info.get("earningsCallTimestampStart"),
+        "earningsCallTimestampEnd":  info.get("earningsCallTimestampEnd"),
     }
 
 
@@ -308,8 +339,8 @@ def _build_growth_estimate(symbol: str) -> dict:
     stock = yf.Ticker(symbol)
     return {
         "ticker": symbol,
-        "revenue_estimates":   df_to_dict(stock.get_revenue_estimates()),
-        "earnings_estimate":   df_to_dict(stock.get_earnings_estimate()),
+        "revenue_estimates": _safe_str(stock.get_revenue_estimates),
+        "earnings_estimate": _safe_str(stock.get_earnings_estimate),
     }
 
 
