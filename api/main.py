@@ -298,8 +298,7 @@ def _build_earnings(symbol: str) -> dict:
     stock = yf.Ticker(symbol)
     return {
         "ticker": symbol,
-        #"earnings_dates":    df_to_dict(stock.earnings_dates),
-        #"earnings_estimate": df_to_dict(stock.get_earnings_estimate()),
+        "earnings_dates": stock.earnings_dates,
         "earnings_estimate": stock.earnings_estimate,
     }
 
@@ -308,8 +307,8 @@ def _build_growth_estimate(symbol: str) -> dict:
     stock = yf.Ticker(symbol)
     return {
         "ticker": symbol,
-        "revenue_estimates": df_to_dict(stock.get_revenue_estimates()),
-        "earnings_estimate": df_to_dict(stock.get_earnings_estimate()),
+        "revenue_estimates": stock.revenue_estimate,
+        "earnings_estimate": stock.earnings_estimate,
     }
 
 
@@ -318,7 +317,7 @@ def _build_income_stmt(symbol: str) -> dict:
     df = stock.get_income_stmt()
     return {
         "ticker": symbol,
-        "income_stmt": df_to_dict(df),
+        "income_stmt": df,
     }
 
 
@@ -327,7 +326,7 @@ def _build_balance_sheet(symbol: str) -> dict:
     df = stock.get_balance_sheet()
     return {
         "ticker": symbol,
-        "balance_sheet": df_to_dict(df),
+        "balance_sheet": df,
     }
 
 
@@ -336,7 +335,7 @@ def _build_inside_tx(symbol: str) -> dict:
     df = stock.get_insider_transactions()
     return {
         "ticker": symbol,
-        "insider_transactions": df_to_dict(df),
+        "insider_transactions": df,
     }
 
 
