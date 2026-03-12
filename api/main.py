@@ -298,8 +298,9 @@ def _build_earnings(symbol: str) -> dict:
     stock = yf.Ticker(symbol)
     return {
         "ticker": symbol,
-        "earnings_dates":    str(stock.earnings_dates),
-        "earnings_estimate": str(stock.earnings_estimate),
+        "earnings_dates":    str(stock.get_earnings_dates()),
+        #"earnings_dates":    str(stock.earnings_dates),
+        "earnings_estimate": str(stock.get_earnings_estimate()),
     }
 
 
