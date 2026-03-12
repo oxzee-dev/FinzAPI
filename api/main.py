@@ -279,57 +279,121 @@ def _build_ticker_data(symbol: str) -> dict:
     }
 
 
-def _build_fin_statement(symbol: str) -> dict:
-    """
-    Returns income statement, balance sheet, and cash flow —
-    both annual (last 4Y) and quarterly (last 4Q).
-    """
-    ticker = yf.Ticker(symbol)
 
-    def df_to_dict(df):
-        """Convert a yfinance DataFrame to a JSON-serialisable dict."""
-        if df is None or df.empty:
-            return {}
-        # Columns are dates — convert to ISO strings
-        df.columns = [str(c)[:10] for c in df.columns]
-        # Replace NaN / inf with None
-        df = df.where(df.notna(), other=None)
-        return df.to_dict()
+# ─────────────────────────────────────────────────────────────
+# Data builders — new routes  (all sync, run in thread pool)
+# ─────────────────────────────────────────────────────────────
 
+def df_to_dict(df) -> dict:
+    """Convert a yfinance DataFrame to a JSON-serialisable dict."""
+    if df is None or df.empty:
+        return {}
+    df = df.copy()
+    df.columns = [str(c)[:10] for c in df.columns]
+    df = df.where(df.notna(), other=None)
+    return df.to_dict()
+
+
+def _build_earnings(symbol: str) -> dict:
+    stock = yf.Ticker(symbol)
     return {
         "ticker": symbol,
-        "income_statement": {
-            "annual":    df_to_dict(ticker.financials),
-            "quarterly": df_to_dict(ticker.quarterly_financials),
-        },
-        "balance_sheet": {
-            "annual":    df_to_dict(ticker.balance_sheet),
-            "quarterly": df_to_dict(ticker.quarterly_balance_sheet),
-        },
-        "cash_flow": {
-            "annual":    df_to_dict(ticker.cashflow),
-            "quarterly": df_to_dict(ticker.quarterly_cashflow),
-        },
+        "earnings_dates":    df_to_dict(stock.earnings_dates),
+        "earnings_estimate": df_to_dict(stock.earnings_estimate),
+    }
+
+
+def _build_growth_estimate(symbol: str) -> dict:
+    stock = yf.Ticker(symbol)
+    return {
+        "ticker": symbol,
+        "revenue_estimates":   df_to_dict(stock.get_revenue_estimates()),
+        "earnings_estimate":   df_to_dict(stock.get_earnings_estimate()),
+    }
+
+
+def _build_income_stmt(symbol: str) -> dict:
+    stock = yf.Ticker(symbol)
+    df = stock.get_income_stmt()
+    return {
+        "ticker": symbol,
+        "income_stmt": df_to_dict(df),
+    }
+
+
+def _build_balance_sheet(symbol: str) -> dict:
+    stock = yf.Ticker(symbol)
+    df = stock.get_balance_sheet()
+    return {
+        "ticker": symbol,
+        "balance_sheet": df_to_dict(df),
+    }
+
+
+def _build_inside_tx(symbol: str) -> dict:
+    stock = yf.Ticker(symbol)
+    df = stock.get_insider_transactions()
+    return {
+        "ticker": symbol,
+        "insider_transactions": df_to_dict(df),
+    }
+
+
+def _build_sec_filings(symbol: str) -> dict:
+    stock = yf.Ticker(symbol)
+    filings = stock.sec_filings
+    # sec_filings is a list of dicts — already serialisable
+    if filings is None:
+        filings = []
+    return {
+        "ticker": symbol,
+        "sec_filings": filings,
     }
 
 
 # ─────────────────────────────────────────────────────────────
-# Async wrappers  (offload sync yfinance calls to thread pool)
+# Async wrappers
 # ─────────────────────────────────────────────────────────────
+
+async def _run(fn, symbol: str) -> dict:
+    """Generic helper: run a sync builder in the thread pool."""
+    loop = asyncio.get_event_loop()
+    try:
+        return await loop.run_in_executor(None, fn, symbol)
+    except Exception as e:
+        return {"ticker": symbol, "error": str(e)}
+
+
 async def fetch_ticker(symbol: str) -> dict:
-    loop = asyncio.get_event_loop()
-    try:
-        return await loop.run_in_executor(None, _build_ticker_data, symbol)
-    except Exception as e:
-        return {"ticker": symbol, "error": str(e)}
+    return await _run(_build_ticker_data, symbol)
+
+async def fetch_earnings(symbol: str) -> dict:
+    return await _run(_build_earnings, symbol)
+
+async def fetch_growth_estimate(symbol: str) -> dict:
+    return await _run(_build_growth_estimate, symbol)
+
+async def fetch_income_stmt(symbol: str) -> dict:
+    return await _run(_build_income_stmt, symbol)
+
+async def fetch_balance_sheet(symbol: str) -> dict:
+    return await _run(_build_balance_sheet, symbol)
+
+async def fetch_inside_tx(symbol: str) -> dict:
+    return await _run(_build_inside_tx, symbol)
+
+async def fetch_sec_filings(symbol: str) -> dict:
+    return await _run(_build_sec_filings, symbol)
 
 
-async def fetch_fin_statement(symbol: str) -> dict:
-    loop = asyncio.get_event_loop()
-    try:
-        return await loop.run_in_executor(None, _build_fin_statement, symbol)
-    except Exception as e:
-        return {"ticker": symbol, "error": str(e)}
+# ─────────────────────────────────────────────────────────────
+# Shared route helper
+# ─────────────────────────────────────────────────────────────
+
+async def _gather(fetcher, symbols: str):
+    tickers = parse_and_validate_tickers(symbols)
+    results = await asyncio.gather(*[fetcher(s) for s in tickers])
+    return results[0] if len(results) == 1 else list(results)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -340,13 +404,6 @@ async def fetch_fin_statement(symbol: str) -> dict:
 async def health():
     return {"status": "ok"}
 
-@app.get("/debug", tags=["Utils"])
-async def debug():
-    key = os.environ.get("API_KEY", "")
-    return {
-        "api_key_configured": bool(key),
-        "api_key_length": len(key),
-    }
 
 @app.get(
     "/ticker/{symbols}",
@@ -358,31 +415,89 @@ async def debug():
         "**Multiple:** `/ticker/AAPL,MSFT,NVDA`"
     ),
 )
-async def get_tickers(
-    symbols: str,
-    _: None = Depends(verify_api_key),
-):
-    tickers = parse_and_validate_tickers(symbols)
-    results = await asyncio.gather(*[fetch_ticker(s) for s in tickers])
-    return results[0] if len(results) == 1 else list(results)
+async def get_tickers(symbols: str, _: None = Depends(verify_api_key)):
+    return await _gather(fetch_ticker, symbols)
 
 
 @app.get(
-    "/fin_statement/{symbols}",
-    tags=["Financial Statements"],
-    summary="Financial statements — single or multiple tickers",
+    "/earnings/{symbols}",
+    tags=["Fundamentals"],
+    summary="Earnings dates & estimates",
     description=(
-        "Returns annual & quarterly **income statement**, **balance sheet**, "
-        "and **cash flow**.\n\n"
-        "Comma-separated ticker symbols in the path, up to 15.\n\n"
-        "**Single:** `/fin_statement/AAPL`\n\n"
-        "**Multiple:** `/fin_statement/AAPL,MSFT`"
+        "Returns `earnings_dates` and `earnings_estimate` for each ticker.\n\n"
+        "**Single:** `/earnings/AAPL`\n\n"
+        "**Multiple:** `/earnings/AAPL,MSFT`"
     ),
 )
-async def get_fin_statements(
-    symbols: str,
-    _: None = Depends(verify_api_key),
-):
-    tickers = parse_and_validate_tickers(symbols)
-    results = await asyncio.gather(*[fetch_fin_statement(s) for s in tickers])
-    return results[0] if len(results) == 1 else list(results)
+async def get_earnings(symbols: str, _: None = Depends(verify_api_key)):
+    return await _gather(fetch_earnings, symbols)
+
+
+@app.get(
+    "/growth_estimate/{symbols}",
+    tags=["Fundamentals"],
+    summary="Revenue & earnings growth estimates",
+    description=(
+        "Returns analyst `revenue_estimates` and `earnings_estimate` for each ticker.\n\n"
+        "**Single:** `/growth_estimate/AAPL`\n\n"
+        "**Multiple:** `/growth_estimate/AAPL,MSFT`"
+    ),
+)
+async def get_growth_estimate(symbols: str, _: None = Depends(verify_api_key)):
+    return await _gather(fetch_growth_estimate, symbols)
+
+
+@app.get(
+    "/income_stmt/{symbols}",
+    tags=["Financial Statements"],
+    summary="Income statement",
+    description=(
+        "Returns the full income statement DataFrame for each ticker.\n\n"
+        "**Single:** `/income_stmt/AAPL`\n\n"
+        "**Multiple:** `/income_stmt/AAPL,MSFT`"
+    ),
+)
+async def get_income_stmt(symbols: str, _: None = Depends(verify_api_key)):
+    return await _gather(fetch_income_stmt, symbols)
+
+
+@app.get(
+    "/balance_sheet/{symbols}",
+    tags=["Financial Statements"],
+    summary="Balance sheet",
+    description=(
+        "Returns the full balance sheet DataFrame for each ticker.\n\n"
+        "**Single:** `/balance_sheet/AAPL`\n\n"
+        "**Multiple:** `/balance_sheet/AAPL,MSFT`"
+    ),
+)
+async def get_balance_sheet(symbols: str, _: None = Depends(verify_api_key)):
+    return await _gather(fetch_balance_sheet, symbols)
+
+
+@app.get(
+    "/inside_tx/{symbols}",
+    tags=["Ownership"],
+    summary="Insider transactions",
+    description=(
+        "Returns insider buy/sell transactions for each ticker.\n\n"
+        "**Single:** `/inside_tx/AAPL`\n\n"
+        "**Multiple:** `/inside_tx/AAPL,MSFT`"
+    ),
+)
+async def get_inside_tx(symbols: str, _: None = Depends(verify_api_key)):
+    return await _gather(fetch_inside_tx, symbols)
+
+
+@app.get(
+    "/sec_filings/{symbols}",
+    tags=["Ownership"],
+    summary="SEC filings",
+    description=(
+        "Returns SEC filings list for each ticker.\n\n"
+        "**Single:** `/sec_filings/AAPL`\n\n"
+        "**Multiple:** `/sec_filings/AAPL,MSFT`"
+    ),
+)
+async def get_sec_filings(symbols: str, _: None = Depends(verify_api_key)):
+    return await _gather(fetch_sec_filings, symbols)
