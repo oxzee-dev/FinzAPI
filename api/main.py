@@ -340,6 +340,13 @@ async def fetch_fin_statement(symbol: str) -> dict:
 async def health():
     return {"status": "ok"}
 
+@app.get("/debug", tags=["Utils"])
+async def debug():
+    key = os.environ.get("API_KEY", "")
+    return {
+        "api_key_configured": bool(key),
+        "api_key_length": len(key),
+    }
 
 @app.get(
     "/ticker/{symbols}",
