@@ -300,7 +300,7 @@ def _build_earnings(symbol: str) -> dict:
         "ticker": symbol,
         #"earnings_dates":    df_to_dict(stock.earnings_dates),
         #"earnings_estimate": df_to_dict(stock.get_earnings_estimate()),
-        #"earnings_estimate": stock.get_earnings_estimate(),
+        "earnings_estimate": stock.earnings_estimate,
     }
 
 
